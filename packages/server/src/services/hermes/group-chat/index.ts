@@ -287,8 +287,8 @@ export class GroupChatServer {
 
         console.log(`[GroupChat] Connected: ${userName} (${userId})`)
 
-        socket.on('join', (data: { roomId?: string; name?: string }, ack) => this.handleJoin(socket, data, ack))
-        socket.on('message', (data: { roomId?: string; content: string }, ack) => this.handleMessage(socket, data, ack))
+        socket.on('join', (data: { roomId?: string; name?: string }, ack?: (response?: unknown) => void) => this.handleJoin(socket, data, ack))
+        socket.on('message', (data: { roomId?: string; content: string }, ack?: (response?: unknown) => void) => this.handleMessage(socket, data, ack))
         socket.on('typing', (data: { roomId?: string }) => this.handleTyping(socket, data))
         socket.on('stop_typing', (data: { roomId?: string }) => this.handleStopTyping(socket, data))
         socket.on('disconnect', () => this.handleDisconnect(socket))
