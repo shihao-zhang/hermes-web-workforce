@@ -428,7 +428,6 @@ export default defineComponent({ components: { CreateRoomForm } })
 .status-bar {
     flex-shrink: 0;
     padding: 6px 20px;
-    background: #ffffff;
     overflow: hidden;
 }
 
@@ -613,6 +612,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     display: flex;
     flex-direction: column;
     min-width: 0;
+    background-color: transparent;
 }
 
 .chat-header {
