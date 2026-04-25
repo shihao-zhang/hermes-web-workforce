@@ -115,6 +115,7 @@ export async function update(ctx: any) {
         ctx.status = 400; ctx.body = { error: `Cannot update credentials for "${poolKey}"` }; return
       }
       if (api_key !== undefined) { await saveEnvValue(envMapping.api_key_env, api_key) }
+      if (base_url !== undefined && envMapping.base_url_env) { await saveEnvValue(envMapping.base_url_env, base_url) }
     }
     try { await hermesCli.restartGateway() } catch (e: any) { logger.error(e, 'Gateway restart failed') }
     ctx.body = { success: true }
@@ -143,6 +144,7 @@ export async function remove(ctx: any) {
       const envMapping = PROVIDER_ENV_MAP[poolKey]
       if (envMapping?.api_key_env) {
         await saveEnvValue(envMapping.api_key_env, '')
+        if (envMapping.base_url_env) { await saveEnvValue(envMapping.base_url_env, '') }
       } else if (!envMapping?.api_key_env) {
         try {
           const authPath = getActiveAuthPath()
