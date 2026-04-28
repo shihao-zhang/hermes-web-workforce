@@ -20,6 +20,7 @@ import {
   updateSessionStats,
   useLocalSessionStore,
 } from '../../db/hermes/session-store'
+import { getDb } from '../../db/index'
 import { getSessionDetailFromDb } from '../../db/hermes/sessions-db'
 import { getModelContextLength } from './model-context'
 import { ChatContextCompressor, countTokens, SUMMARY_PREFIX } from '../../lib/context-compressor'
@@ -53,6 +54,9 @@ interface SessionState {
   events: Array<{ event: string; data: any }>
   abortController?: AbortController
   runId?: string
+  /** Ephemeral session ID used for Hermes (one per run) */
+  hermesSessionId?: string
+  profile?: string
   inputTokens?: number
   outputTokens?: number
 }
@@ -198,10 +202,17 @@ export class ChatRunSocket {
     const upstream = (process.env.UPSTREAM || 'http://127.0.0.1:8642').replace(/\/$/, '')
     const apiKey = this.gatewayManager.getApiKey(profile) || undefined
 
+    // Generate ephemeral session ID for Hermes (fresh session per run)
+    const hermesSessionId = session_id
+      ? `eph_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+      : undefined
+
     // Mark working immediately on run start, and append user message
     if (session_id) {
       const state = this.getOrCreateSession(session_id)
       state.isWorking = true
+      state.hermesSessionId = hermesSessionId
+      state.profile = profile
       const now = Math.floor(Date.now() / 1000)
       state.messages.push({
         id: state.messages.length + 1,
@@ -214,7 +225,8 @@ export class ChatRunSocket {
       // Create session in local DB if it doesn't exist (local store only)
       if (useLocalSessionStore()) {
         if (!getSession(session_id)) {
-          createSession({ id: session_id, profile, model })
+          const preview = input.replace(/[\r\n]/g, ' ').substring(0, 100)
+          createSession({ id: session_id, profile, model, title: preview })
         }
         addMessage({
           session_id,
@@ -240,7 +252,7 @@ export class ChatRunSocket {
     try {
       // Build upstream request body
       const body: Record<string, any> = { input }
-      if (session_id) body.session_id = session_id
+      if (hermesSessionId) body.session_id = hermesSessionId
       if (model) body.model = model
       if (instructions) body.instructions = instructions
 
@@ -669,43 +681,95 @@ export class ChatRunSocket {
       state.runId = undefined
       state.events = []
 
-      // Persist messages to local DB only if using local store
-      if (useLocalSessionStore()) {
-        this.persistSessionMessages(sessionId, state)
+      // Sync messages from Hermes ephemeral session to local DB
+      if (useLocalSessionStore() && state.hermesSessionId) {
+        const hermesId = state.hermesSessionId
+        const prof = state.profile
+        state.hermesSessionId = undefined
+        state.profile = undefined
+        this.syncFromHermes(sessionId, hermesId, prof)
       }
     }
   }
 
-  /** Write in-memory messages to local DB and update session stats */
-  private persistSessionMessages(sessionId: string, state: SessionState) {
-    try {
-      const dbDetail = getSessionDetail(sessionId)
-      const existingCount = dbDetail?.messages?.length || 0
-      const newMessages = state.messages.slice(existingCount)
-
-      if (newMessages.length > 0) {
-        for (const msg of newMessages) {
-          addMessage({
-            session_id: msg.session_id,
-            role: msg.role,
-            content: msg.content || '',
-            tool_call_id: msg.tool_call_id ?? null,
-            tool_calls: msg.tool_calls ?? null,
-            tool_name: msg.tool_name ?? null,
-            timestamp: msg.timestamp,
-            finish_reason: msg.finish_reason ?? null,
-            reasoning: msg.reasoning ?? null,
-            reasoning_details: msg.reasoning_details ?? null,
-            reasoning_content: msg.reasoning_content ?? null,
-            codex_reasoning_items: msg.codex_reasoning_items ?? null,
-          })
+  /**
+   * Read complete messages from Hermes state.db for the ephemeral session
+   * and write to local DB. This gives us tool results that SSE events don't include.
+   * After sync, enqueues the ephemeral session for deletion.
+   */
+  private syncFromHermes(localSessionId: string, hermesSessionId: string, profile?: string) {
+    getSessionDetailFromDb(hermesSessionId)
+      .then((detail) => {
+        if (!detail || !detail.messages?.length) {
+          logger.warn('[chat-run-socket] syncFromHermes: no data for Hermes session %s', hermesSessionId)
+          return
         }
-      }
 
-      updateSessionStats(sessionId)
-    } catch (err: any) {
-      logger.warn(err, '[chat-run-socket] failed to persist messages for session %s', sessionId)
-    }
+        // Skip user messages — already written to local DB in handleRun
+        const toInsert = detail.messages.filter(m => m.role !== 'user')
+
+        // Build tool_call_id → function.name lookup from assistant messages
+        // (Hermes stores tool_name as NULL, name lives inside tool_calls JSON)
+        const toolNameMap = new Map<string, string>()
+        for (const msg of detail.messages) {
+          if (msg.role === 'assistant' && Array.isArray(msg.tool_calls)) {
+            for (const tc of msg.tool_calls) {
+              const id = tc.id || tc.call_id || tc.tool_call_id
+              const name = tc.function?.name || tc.name
+              if (id && name) toolNameMap.set(id, name)
+            }
+          }
+        }
+
+        if (toInsert.length > 0) {
+          for (const msg of toInsert) {
+            // Resolve tool_name from assistant's tool_calls if missing
+            let toolName = msg.tool_name || null
+            if (!toolName && msg.tool_call_id) {
+              toolName = toolNameMap.get(msg.tool_call_id) || null
+            }
+            addMessage({
+              session_id: localSessionId,
+              role: msg.role,
+              content: msg.content || '',
+              tool_call_id: msg.tool_call_id || null,
+              tool_calls: msg.tool_calls || null,
+              tool_name: toolName,
+              timestamp: msg.timestamp || Math.floor(Date.now() / 1000),
+              token_count: msg.token_count || null,
+              finish_reason: msg.finish_reason || null,
+              reasoning: msg.reasoning || null,
+              reasoning_details: msg.reasoning_details || null,
+              reasoning_content: msg.reasoning_content || null,
+              codex_reasoning_items: msg.codex_reasoning_items || null,
+            })
+          }
+          logger.info('[chat-run-socket] syncFromHermes: synced %d messages to local session %s', toInsert.length, localSessionId)
+        }
+
+        updateSessionStats(localSessionId)
+
+        // Enqueue ephemeral session for deferred deletion
+        this.enqueueEphemeralDelete(hermesSessionId, profile)
+      })
+      .catch((err: any) => {
+        logger.warn(err, '[chat-run-socket] syncFromHermes failed for session %s', localSessionId)
+      })
+  }
+
+  /** Enqueue an ephemeral Hermes session for deferred deletion */
+  private enqueueEphemeralDelete(hermesSessionId: string, profile?: string) {
+    try {
+      const db = getDb()
+      if (!db) return
+      const now = Date.now()
+      db.prepare(
+        `INSERT INTO gc_pending_session_deletes (session_id, profile_name, status, attempt_count, last_error, created_at, updated_at, next_attempt_at)
+         VALUES (?, ?, 'pending', 0, NULL, ?, ?, ?)
+         ON CONFLICT(session_id) DO NOTHING`,
+      ).run(hermesSessionId, profile || 'default', now, now, now)
+      logger.info('[chat-run-socket] enqueued ephemeral session %s for deletion', hermesSessionId)
+    } catch { /* best-effort */ }
   }
 
   /** Get or create session state in sessionMap */

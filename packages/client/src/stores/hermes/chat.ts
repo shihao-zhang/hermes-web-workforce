@@ -499,7 +499,6 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function newChat() {
-    if (isStreaming.value) return
     const session = createSession()
     // Inherit current global model
     const appStore = useAppStore()

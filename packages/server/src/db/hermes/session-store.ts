@@ -127,13 +127,16 @@ function parseToolCalls(value: unknown): any[] | null {
 }
 
 function mapSessionRow(row: Record<string, unknown>): HermesSessionRow {
+  const rawTitle = row.title != null ? String(row.title) : null
+  const preview = String(row.preview || '')
+  const title = rawTitle || (preview ? (preview.length > 40 ? preview.slice(0, 40) + '...' : preview) : null)
   return {
     id: String(row.id || ''),
     profile: String(row.profile || 'default'),
     source: String(row.source || 'api_server'),
     user_id: row.user_id != null ? String(row.user_id) : null,
     model: String(row.model || ''),
-    title: row.title != null ? String(row.title) : null,
+    title,
     started_at: Number(row.started_at || 0),
     ended_at: row.ended_at != null ? Number(row.ended_at) : null,
     end_reason: row.end_reason != null ? String(row.end_reason) : null,
