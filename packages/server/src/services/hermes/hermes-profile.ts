@@ -2,7 +2,7 @@ import { resolve, join } from 'path'
 import { homedir } from 'os'
 import { readFileSync, existsSync } from 'fs'
 
-const HERMES_BASE = resolve(homedir(), '.hermes')
+export const HERMES_BASE = resolve(homedir(), '.hermes')
 
 /**
  * Get the active profile's home directory.
@@ -64,4 +64,17 @@ export function getProfileDir(name: string): string {
   if (!name || name === 'default') return HERMES_BASE
   const dir = join(HERMES_BASE, 'profiles', name)
   return existsSync(dir) ? dir : HERMES_BASE
+}
+
+/**
+ * Resolve a profile directory without falling back when it does not exist.
+ * Use this for creation/writes where silently targeting default would be risky.
+ */
+export function resolveProfileDir(name: string): string {
+  if (!name || name === 'default') return HERMES_BASE
+  return join(HERMES_BASE, 'profiles', name)
+}
+
+export function profileDirExists(name: string): boolean {
+  return existsSync(resolveProfileDir(name))
 }

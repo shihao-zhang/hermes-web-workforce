@@ -1,6 +1,6 @@
 import { Server, Socket, Namespace } from 'socket.io'
 import type { Server as HttpServer } from 'http'
-import { getToken } from '../../../services/auth'
+import { getToken, isValidAuthToken } from '../../../services/auth'
 import { logger } from '../../../services/logger'
 import { getDb, ensureTable } from '../../../db'
 import { AgentClients } from './agent-clients'
@@ -592,7 +592,7 @@ export class GroupChatServer {
         const authToken = await getToken()
         const token = socket.handshake.auth.token || socket.handshake.query.token || ''
         if (authToken) {
-            if (token !== authToken) {
+            if (!isValidAuthToken(String(token), authToken)) {
                 return next(new Error('Unauthorized'))
             }
         }

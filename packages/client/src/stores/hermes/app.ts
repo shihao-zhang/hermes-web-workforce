@@ -22,6 +22,10 @@ export const useAppStore = defineStore('app', () => {
   const customModels = ref<Record<string, string[]>>({})
   const healthPollTimer = ref<ReturnType<typeof setInterval>>()
   const nodeVersion = ref('')
+  const hermesCliPath = ref('')
+  const hermesCliAvailable = ref(false)
+  const hermesCliResolutionSource = ref('')
+  const hermesCliErrorMessage = ref('')
 
   // Settings
   const streamEnabled = ref(true)
@@ -50,6 +54,10 @@ export const useAppStore = defineStore('app', () => {
       if (res.webui_latest) latestVersion.value = res.webui_latest
       updateAvailable.value = !!res.webui_update_available
       if (res.node_version) nodeVersion.value = res.node_version
+      hermesCliPath.value = res.hermes_cli_path || ''
+      hermesCliAvailable.value = !!res.hermes_cli_available
+      hermesCliResolutionSource.value = res.resolution_source || ''
+      hermesCliErrorMessage.value = res.error_message || ''
     } catch {
       connected.value = false
     }
@@ -126,6 +134,10 @@ export const useAppStore = defineStore('app', () => {
     serverVersion,
     latestVersion,
     nodeVersion,
+    hermesCliPath,
+    hermesCliAvailable,
+    hermesCliResolutionSource,
+    hermesCliErrorMessage,
     updateAvailable,
     updating,
     doUpdate,

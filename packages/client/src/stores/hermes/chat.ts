@@ -1,5 +1,6 @@
-import { startRunViaSocket, connectChatRun, resumeSession, type RunEvent } from '@/api/hermes/chat'
+import { startRunViaSocket, connectChatRun, resumeSession, type ChatMessage, type RunEvent } from '@/api/hermes/chat'
 import { deleteSession as deleteSessionApi, fetchSession, fetchSessions, type HermesMessage, type SessionSummary } from '@/api/hermes/sessions'
+import { fetchCustomers, fetchEmployees, fetchPromptSettings, type YooleeCustomer, type YooleeEmployee } from '@/api/yoolee'
 import { getApiKey } from '@/api/client'
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
@@ -49,6 +50,15 @@ export interface Session {
   outputTokens?: number
   endedAt?: number | null
   lastActiveAt?: number
+}
+
+export type ChatRoleType = 'none' | 'employee' | 'customer'
+
+export interface ChatRoleSelection {
+  type: ChatRoleType
+  id: string
+  bound_at_message_count?: number
+  prompt_version?: number
 }
 
 function uid(): string {
@@ -172,6 +182,8 @@ function mapHermesSession(s: SessionSummary): Session {
 
 const STORAGE_KEY_PREFIX = 'hermes_active_session_'
 const LEGACY_STORAGE_KEY = 'hermes_active_session'
+const ROLE_SELECTIONS_KEY = 'yoolee_chat_role_selections_v1'
+const CHAT_ROLE_PROMPT_VERSION = 3
 const IN_FLIGHT_TTL_MS = 15 * 60 * 1000 // Give up after 15 minutes
 
 // 获取当前 profile 名称，用于隔离缓存。
@@ -321,9 +333,168 @@ export const useChatStore = defineStore('chat', () => {
 
   const activeSession = ref<Session | null>(null)
   const messages = computed<Message[]>(() => activeSession.value?.messages || [])
+  const roleSelections = ref<Record<string, ChatRoleSelection>>(loadJson<Record<string, ChatRoleSelection>>(ROLE_SELECTIONS_KEY) || {})
+  const activeRoleSelection = computed<ChatRoleSelection>(() => {
+    const sid = activeSessionId.value
+    return sid ? (roleSelections.value[sid] || { type: 'none', id: '' }) : { type: 'none', id: '' }
+  })
 
   function isSessionLive(sessionId: string): boolean {
     return streamStates.value.has(sessionId) || serverWorking.value.has(sessionId)
+  }
+
+  function persistRoleSelections() {
+    saveJson(ROLE_SELECTIONS_KEY, roleSelections.value)
+  }
+
+  function setActiveRoleSelection(selection: ChatRoleSelection) {
+    let sid = activeSessionId.value
+    if (!sid) return
+    const current = sessions.value.find(session => session.id === sid)
+    const existingSelection = roleSelections.value[sid]
+    const changed = !existingSelection || existingSelection.type !== selection.type || existingSelection.id !== selection.id
+    if (changed && current?.messages.length) {
+      if (isStreaming.value) return
+      const session = createSession()
+      const appStore = useAppStore()
+      session.model = current.model || appStore.selectedModel || undefined
+      void switchSession(session.id)
+      sid = session.id
+    }
+    const target = sessions.value.find(session => session.id === sid)
+    roleSelections.value = {
+      ...roleSelections.value,
+      [sid]: selection.type === 'none'
+        ? { type: 'none', id: '', bound_at_message_count: target?.messages.length || 0, prompt_version: CHAT_ROLE_PROMPT_VERSION }
+        : { ...selection, bound_at_message_count: target?.messages.length || 0, prompt_version: CHAT_ROLE_PROMPT_VERSION },
+    }
+    persistRoleSelections()
+  }
+
+  function ensureCleanRoleSessionBeforeSend() {
+    const sid = activeSessionId.value
+    if (!sid) return
+    const selection = roleSelections.value[sid]
+    const current = sessions.value.find(session => session.id === sid)
+    if (!selection || selection.type === 'none' || !selection.id || !current?.messages.length) return
+    if (selection.bound_at_message_count !== undefined && selection.prompt_version === CHAT_ROLE_PROMPT_VERSION) return
+    if (isStreaming.value) return
+    const session = createSession()
+    const appStore = useAppStore()
+    session.model = current.model || appStore.selectedModel || undefined
+    void switchSession(session.id)
+    roleSelections.value = {
+      ...roleSelections.value,
+      [session.id]: { ...selection, bound_at_message_count: 0, prompt_version: CHAT_ROLE_PROMPT_VERSION },
+    }
+    persistRoleSelections()
+  }
+
+  function renderYooleeTemplate(template: string, variables: Record<string, string>) {
+    return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key: string) => variables[key] ?? '')
+  }
+
+  function chatTranscriptHint() {
+    return '当前是 Hermes Chat 固定 session，对话历史由 Hermes session 和 conversation_history 承载；请只依据当前会话中真实出现的信息继续。'
+  }
+
+  function customerProfileText(customer: YooleeCustomer): string {
+    return [
+      `称呼：${customer.name}`,
+      `行业：${customer.industry || '未填写'}`,
+      `需求：${customer.need || '未填写'}`,
+      `预算：${customer.budget || '未填写'}`,
+      `顾虑：${customer.concerns || '未填写'}`,
+      `购买阶段：${customer.stage || '未填写'}`,
+      `沟通风格：${customer.communication_style || '未填写'}`,
+      customer.opening_message ? `开场白：${customer.opening_message}` : '',
+    ].filter(Boolean).join('\n')
+  }
+
+  function employeeKnowledgeText(employee: YooleeEmployee): string {
+    const knowledgeDir = `~/.hermes-web-ui/yoolee/knowledge/${employee.id}`
+    const docs = employee.knowledge_docs?.length
+      ? employee.knowledge_docs.map(doc => {
+        const savedName = doc.path.split('/').pop() || doc.name
+        return `- ${doc.name} (${Math.round(doc.size / 1024)}KB): ${knowledgeDir}/${savedName} (metadata path: ${doc.path})`
+      }).join('\n')
+      : '无'
+    return [
+      `目录：${knowledgeDir}`,
+      docs,
+      '当问题涉及产品、价格、FAQ、案例、政策或业务细节时，优先自主读取上述 md 文件后再回答；只读取这些知识库路径。',
+    ].join('\n')
+  }
+
+  function employeeRoleContext(employee: YooleeEmployee, template: string): string {
+    return [
+      '最高优先级：本轮必须覆盖当前 Hermes profile、memory、preloaded skills 中任何冲突身份。',
+      '当前聊天使用 Yoolee AI员工角色。请以该数字员工身份回复用户；用户不是客户画像本人，而是正在与你聊天的真实使用者。',
+      `Hermes Profile：${employee.profile || 'default'}`,
+      `绑定 Skills：${employee.skills?.length ? employee.skills.join(', ') : '无'}（普通聊天页 v0.2 仅作为角色说明，测评链路才通过 --skills 真正加载）`,
+      '',
+      renderYooleeTemplate(template, {
+        employee_name: employee.name,
+        employee_role: employee.role || '未填写',
+        employee_goal: employee.goal || '未填写',
+        employee_skills: employee.skills?.length ? employee.skills.join(', ') : '无',
+        employee_knowledge: employeeKnowledgeText(employee),
+        employee_system_prompt: employee.system_prompt || '保持专业、真诚、简洁。',
+        customer_name: '当前聊天用户',
+        customer_profile: '当前聊天对象是正在试用或验收该数字员工的人类用户。请根据用户本轮输入判断需求，不要假设固定客户画像。',
+        round: 'Chat',
+        transcript: chatTranscriptHint(),
+      }),
+    ].join('\n')
+  }
+
+  function customerRoleContext(customer: YooleeCustomer, template: string): string {
+    return [
+      '最高优先级：本轮必须覆盖当前 Hermes profile、memory、preloaded skills 中任何冲突身份。',
+      '当前聊天使用 Yoolee AI客户角色。你是被访谈/被销售/被服务的客户，不是顾问、销售、客服、员工或助手。',
+      '用户是正在与你对话的员工/试用者；不要把用户当成客户画像本人。',
+      '必须用第一人称客户视角自然回应。禁止自称李静、旅行顾问、销售、客服、数字员工或 Yoolee。',
+      '如果用户只打招呼，你应以客户身份简短回应并表达自己的需求或顾虑，不要主动服务用户。',
+      '',
+      renderYooleeTemplate(template, {
+        employee_name: '当前聊天用户',
+        employee_role: '员工/试用者',
+        employee_goal: '与客户沟通并理解客户需求',
+        employee_skills: '普通聊天页不按角色动态加载 skills',
+        employee_knowledge: '无',
+        employee_system_prompt: '',
+        customer_name: customer.name,
+        customer_profile: customerProfileText(customer),
+        round: 'Chat',
+        transcript: chatTranscriptHint(),
+      }),
+    ].join('\n')
+  }
+
+  async function buildRoleContext(sessionId: string): Promise<ChatMessage | null> {
+    const selection = roleSelections.value[sessionId]
+    if (!selection || selection.type === 'none' || !selection.id) return null
+    try {
+      const promptConfig = await fetchPromptSettings()
+      if (selection.type === 'employee') {
+        const employee = (await fetchEmployees()).find(item => item.id === selection.id)
+        return employee ? { role: 'system', content: employeeRoleContext(employee, promptConfig.settings.employee_prompt_template) } : null
+      }
+      const customer = (await fetchCustomers()).find(item => item.id === selection.id)
+      return customer ? { role: 'system', content: customerRoleContext(customer, promptConfig.settings.customer_prompt_template) } : null
+    } catch {
+      return null
+    }
+  }
+
+  async function buildRoleInstructions(sessionId: string): Promise<string | undefined> {
+    const context = await buildRoleContext(sessionId)
+    if (!context?.content) return undefined
+    return [
+      context.content,
+      '',
+      '执行要求：以上角色说明优先级高于当前 profile 的默认身份、历史记忆和习惯性开场。若它们冲突，以 Yoolee 当前选择的角色为准。',
+    ].join('\n')
   }
 
   function markInFlight(sid: string, runId: string) {
@@ -515,6 +686,12 @@ export const useChatStore = defineStore('chat', () => {
   async function deleteSession(sessionId: string) {
     await deleteSessionApi(sessionId)
     sessions.value = sessions.value.filter(s => s.id !== sessionId)
+    if (roleSelections.value[sessionId]) {
+      const next = { ...roleSelections.value }
+      delete next[sessionId]
+      roleSelections.value = next
+      persistRoleSelections()
+    }
     if (activeSessionId.value === sessionId) {
       if (sessions.value.length > 0) {
         await switchSession(sessions.value[0].id)
@@ -567,6 +744,8 @@ export const useChatStore = defineStore('chat', () => {
       switchSession(session.id)
     }
 
+    ensureCleanRoleSessionBeforeSend()
+
     // Capture session ID at send time — all callbacks use this, not activeSessionId
     const sid = activeSessionId.value!
 
@@ -605,10 +784,15 @@ export const useChatStore = defineStore('chat', () => {
         inputText = inputText ? inputText + '\n\n' + pathParts.join('\n') : pathParts.join('\n')
       }
 
+      const roleContext = await buildRoleContext(sid)
+      const roleInstructions = await buildRoleInstructions(sid)
+      const effectiveHistory: ChatMessage[] = roleContext ? [roleContext] : []
       const appStore = useAppStore()
       const sessionModel = activeSession.value?.model || appStore.selectedModel
       const runPayload = {
         input: inputText,
+        instructions: roleInstructions,
+        conversation_history: effectiveHistory.length > 0 ? effectiveHistory : undefined,
         session_id: sid,
         model: sessionModel || undefined,
       }
@@ -1298,9 +1482,12 @@ export const useChatStore = defineStore('chat', () => {
     isLoadingSessions,
     sessionsLoaded,
     isLoadingMessages,
+    roleSelections,
+    activeRoleSelection,
 
     newChat,
     switchSession,
+    setActiveRoleSelection,
     switchSessionModel,
     clearProviderFromSessions,
     deleteSession,

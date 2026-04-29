@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { NButton, NSpin } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import ProfilesPanel from '@/components/hermes/profiles/ProfilesPanel.vue'
 import ProfileCreateModal from '@/components/hermes/profiles/ProfileCreateModal.vue'
 import ProfileRenameModal from '@/components/hermes/profiles/ProfileRenameModal.vue'
@@ -9,6 +10,7 @@ import ProfileImportModal from '@/components/hermes/profiles/ProfileImportModal.
 import { useProfilesStore } from '@/stores/hermes/profiles'
 
 const { t } = useI18n()
+const router = useRouter()
 const profilesStore = useProfilesStore()
 
 const showCreateModal = ref(false)
@@ -37,6 +39,9 @@ function handleImported() {
     <header class="page-header">
       <h2 class="header-title">{{ t('profiles.title') }}</h2>
       <div class="header-actions">
+        <NButton size="small" tertiary @click="router.push({ name: 'hermes.memory' })">
+          记忆
+        </NButton>
         <NButton size="small" @click="showImportModal = true">
           <template #icon>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

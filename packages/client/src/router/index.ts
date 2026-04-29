@@ -11,6 +11,56 @@ const router = createRouter({
       meta: { public: true },
     },
     {
+      path: '/yoolee',
+      name: 'yoolee.workbench',
+      component: () => import('@/views/yoolee/YooleeDashboardView.vue'),
+    },
+    {
+      path: '/yoolee/employees',
+      name: 'yoolee.employees',
+      component: () => import('@/views/yoolee/YooleeDashboardView.vue'),
+    },
+    {
+      path: '/yoolee/employees/:id',
+      name: 'yoolee.employeeDetail',
+      component: () => import('@/views/yoolee/YooleeDashboardView.vue'),
+    },
+    {
+      path: '/yoolee/customers',
+      name: 'yoolee.customers',
+      component: () => import('@/views/yoolee/YooleeDashboardView.vue'),
+    },
+    {
+      path: '/yoolee/customers/:id',
+      name: 'yoolee.customerDetail',
+      component: () => import('@/views/yoolee/YooleeDashboardView.vue'),
+    },
+    {
+      path: '/yoolee/evaluations',
+      name: 'yoolee.evaluations',
+      component: () => import('@/views/yoolee/YooleeDashboardView.vue'),
+    },
+    {
+      path: '/yoolee/evaluations/:id',
+      name: 'yoolee.evaluationDetail',
+      component: () => import('@/views/yoolee/YooleeDashboardView.vue'),
+    },
+    {
+      path: '/yoolee/learning',
+      name: 'yoolee.learning',
+      component: () => import('@/views/yoolee/YooleeDashboardView.vue'),
+    },
+    {
+      path: '/yoolee/data',
+      name: 'yoolee.data',
+      redirect: { name: 'yoolee.workbench', query: { section: 'data' } },
+    },
+    {
+      path: '/yoolee/settings',
+      name: 'yoolee.settings',
+      component: () => import('@/views/yoolee/YooleeDashboardView.vue'),
+    },
+    {
       path: '/hermes/chat',
       name: 'hermes.chat',
       component: () => import('@/views/hermes/ChatView.vue'),
@@ -88,7 +138,7 @@ router.beforeEach((to, _from, next) => {
   if (to.meta.public) {
     // Already has key, skip login
     if (to.name === 'login' && hasApiKey()) {
-      next({ path: '/hermes/chat' })
+      next({ name: 'yoolee.workbench' })
       return
     }
     next()

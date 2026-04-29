@@ -9,6 +9,7 @@ export interface ChatMessage {
 export interface StartRunRequest {
   input: string | ChatMessage[]
   instructions?: string
+  conversation_history?: ChatMessage[]
   session_id?: string
   model?: string
 }

@@ -63,3 +63,13 @@ export async function toggleSkill(name: string, enabled: boolean): Promise<void>
     body: JSON.stringify({ name, enabled }),
   })
 }
+
+export async function importSkillArchive(file: File, targetProfile = 'current'): Promise<{ installed: Array<{ profile?: string; category: string; name: string }> }> {
+  const formData = new FormData()
+  formData.append('file', file, file.name)
+  const query = targetProfile ? `?target_profile=${encodeURIComponent(targetProfile)}` : ''
+  return request(`/api/hermes/skills/import${query}`, {
+    method: 'POST',
+    body: formData,
+  })
+}

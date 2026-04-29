@@ -435,9 +435,9 @@ function getLatestContinuationChild(
     .filter((c): c is HermesSessionInternalRow => !!c)
     .filter(c => Number(c.started_at || 0) >= Number(parent.ended_at || 0))
     .sort((a, b) => {
-      const aDelta = Number(a.started_at || 0) - Number(parent.ended_at || 0)
-      const bDelta = Number(b.started_at || 0) - Number(parent.ended_at || 0)
-      if (aDelta !== bDelta) return aDelta - bDelta
+      const aStarted = Number(a.started_at || 0)
+      const bStarted = Number(b.started_at || 0)
+      if (aStarted !== bStarted) return bStarted - aStarted
       return b.id.localeCompare(a.id)
     })
   return candidates[0] || null

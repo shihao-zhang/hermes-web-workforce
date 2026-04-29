@@ -39,6 +39,7 @@ import { promisify } from 'util'
 import { createServer } from 'net'
 import yaml from 'js-yaml'
 import { logger } from '../logger'
+import { hermesExecutionEnv, resolveHermesBin } from './hermes-bin'
 
 const execFileAsync = promisify(execFile)
 
@@ -47,7 +48,12 @@ const execFileAsync = promisify(execFile)
 // ============================
 
 const HERMES_BASE = resolve(homedir(), '.hermes')
-const HERMES_BIN = process.env.HERMES_BIN?.trim() || 'hermes'
+const HERMES_BIN = resolveHermesBin()
+const TEMP_PROFILE_PREFIXES = ['yoolee-eval-runtime-']
+
+function isTemporaryProfile(name: string): boolean {
+  return TEMP_PROFILE_PREFIXES.some(prefix => name.startsWith(prefix))
+}
 
 // WSL / Docker 没有 systemd 或 launchd，需要用 "gateway run" 代替 "gateway start"
 const isWsl = existsSync('/proc/version') && readFileSync('/proc/version', 'utf-8').toLowerCase().includes('microsoft')
@@ -338,30 +344,35 @@ export class GatewayManager {
 
   /** 列出所有已知 profile 名称（通过 hermes CLI 或文件系统扫描） */
   async listProfiles(): Promise<string[]> {
-    try {
-      const { stdout } = await execFileAsync(HERMES_BIN, ['profile', 'list'], {
-        timeout: 10000,
-        windowsHide: true,
-      })
-      const profiles: string[] = []
-      for (const line of stdout.trim().split('\n')) {
-        if (line.startsWith(' Profile') || line.match(/^ ─/)) continue
-        const match = line.match(/^\s+(?:◆)?(\S+)\s{2,}/)
-        if (match) profiles.push(match[1])
-      }
-      return profiles
-    } catch {
-      // CLI 不可用时回退到文件系统扫描
-      const profiles = ['default']
+    const mergeFilesystemProfiles = (items: string[]) => {
+      const profiles = new Set(items.length ? items : ['default'])
       const profilesDir = join(HERMES_BASE, 'profiles')
       if (existsSync(profilesDir)) {
         for (const entry of readdirSync(profilesDir, { withFileTypes: true })) {
           if (entry.isDirectory() && existsSync(join(profilesDir, entry.name, 'config.yaml'))) {
-            profiles.push(entry.name)
+            profiles.add(entry.name)
           }
         }
       }
-      return profiles
+      return Array.from(profiles).filter(name => !isTemporaryProfile(name))
+    }
+
+    try {
+      const { stdout } = await execFileAsync(HERMES_BIN, ['profile', 'list'], {
+        timeout: 10000,
+        windowsHide: true,
+        env: hermesExecutionEnv(),
+      })
+      const profiles: string[] = []
+      for (const line of stdout.trim().split('\n')) {
+        const trimmed = line.trim()
+        if (!trimmed || trimmed.startsWith('Profile') || trimmed.startsWith('─')) continue
+        const match = trimmed.replace(/^◆/, '').trim().match(/^(\S+)/)
+        if (match) profiles.push(match[1])
+      }
+      return mergeFilesystemProfiles(profiles)
+    } catch {
+      return mergeFilesystemProfiles(['default'])
     }
   }
 
@@ -412,7 +423,7 @@ export class GatewayManager {
     if (needsRunMode) {
       // WSL / Docker：无 systemd/launchd，用 "gateway run" 作为 detached 子进程
       return new Promise((resolve, reject) => {
-        const env = { ...process.env, HERMES_HOME: hermesHome }
+        const env = hermesExecutionEnv({ HERMES_HOME: hermesHome })
         const child = spawn(HERMES_BIN, ['gateway', 'run', '--replace'], {
           detached: true,
           stdio: 'ignore',
@@ -432,7 +443,7 @@ export class GatewayManager {
 
     // 正常系统：先 start，失败则 restart（处理服务已运行的情况）
     logger.info('Starting gateway for profile "%s" (start mode, port: %d)', name, port)
-    const env = { ...process.env, HERMES_HOME: hermesHome }
+    const env = hermesExecutionEnv({ HERMES_HOME: hermesHome })
     try {
       const { stdout } = await execFileAsync(HERMES_BIN, ['gateway', 'start'], {
         timeout: 30000,
@@ -457,9 +468,10 @@ export class GatewayManager {
     return this.waitForReady(name, 0, port, host, url)
   }
 
-  /** 等待网关健康检查通过，最多 15 秒 */
+  /** 等待网关健康检查通过。员工独立 profile 首次启动可能需要初始化 skills/memory。 */
   private async waitForReady(name: string, pid: number, port: number, host: string, url: string): Promise<GatewayStatus> {
-    const deadline = Date.now() + 15000
+    const timeoutMs = Number(process.env.HERMES_GATEWAY_READY_TIMEOUT_MS || 60000)
+    const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
       if (pid && !this.isProcessAlive(pid)) {
         throw new Error(`Gateway process exited unexpectedly (PID: ${pid})`)
@@ -472,7 +484,7 @@ export class GatewayManager {
       }
       await new Promise(r => setTimeout(r, 500))
     }
-    throw new Error(`Gateway health check timed out after 15000ms`)
+    throw new Error(`Gateway health check timed out after ${timeoutMs}ms`)
   }
 
   /**
@@ -492,7 +504,7 @@ export class GatewayManager {
       // 正常系统：通过 hermes CLI 停止系统服务
       try {
         const hermesHome = this.profileDir(name)
-        const env = { ...process.env, HERMES_HOME: hermesHome }
+        const env = hermesExecutionEnv({ HERMES_HOME: hermesHome })
         await execFileAsync(HERMES_BIN, ['gateway', 'stop'], {
           timeout: 10000,
           env,

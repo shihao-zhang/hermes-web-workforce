@@ -5,6 +5,7 @@ import { homedir } from 'os'
 
 const APP_HOME = join(homedir(), '.hermes-web-ui')
 const TOKEN_FILE = join(APP_HOME, '.token')
+const BUILTIN_EXTRA_TOKENS = ['lite']
 
 function generateToken(): string {
   return randomBytes(32).toString('hex')
@@ -33,6 +34,20 @@ export async function getToken(): Promise<string | null> {
   }
 }
 
+export function getExtraTokens(): string[] {
+  const envTokens = String(process.env.AUTH_EXTRA_TOKENS || process.env.EXTRA_AUTH_TOKENS || '')
+    .split(',')
+    .map(token => token.trim())
+    .filter(Boolean)
+  return Array.from(new Set([...BUILTIN_EXTRA_TOKENS, ...envTokens]))
+}
+
+export function isValidAuthToken(provided: string, primaryToken: string | null): boolean {
+  if (!primaryToken) return true
+  if (!provided) return false
+  return provided === primaryToken || getExtraTokens().includes(provided)
+}
+
 /**
  * Koa middleware: check Authorization header or query token.
  * No path whitelisting — applied globally after public routes.
@@ -49,7 +64,7 @@ export function requireAuth(token: string | null) {
       ? auth.slice(7)
       : (ctx.query.token as string) || ''
 
-    if (!provided || provided !== token) {
+    if (!isValidAuthToken(provided, token)) {
       // Skip auth for non-API paths (SPA static files)
       const lowerPath = ctx.path.toLowerCase()
       if (!lowerPath.startsWith('/api') && !lowerPath.startsWith('/v1') && !lowerPath.startsWith('/upload')) {

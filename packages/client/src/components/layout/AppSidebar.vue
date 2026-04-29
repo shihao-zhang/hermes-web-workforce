@@ -4,21 +4,47 @@ import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { NButton, NModal, useMessage } from "naive-ui";
 import { useAppStore } from "@/stores/hermes/app";
-import ModelSelector from "./ModelSelector.vue";
-import ProfileSelector from "./ProfileSelector.vue";
+import { useProfilesStore } from '@/stores/hermes/profiles'
 import LanguageSwitch from "./LanguageSwitch.vue";
 import ThemeSwitch from "./ThemeSwitch.vue";
 import { useSessionSearch } from '@/composables/useSessionSearch'
 import { changelog } from "@/data/changelog";
+import logoImage from "@/assets/logo.png";
 
 const { t } = useI18n();
 const message = useMessage();
 const route = useRoute();
 const router = useRouter();
 const appStore = useAppStore();
+const profilesStore = useProfilesStore()
 const { openSessionSearch } = useSessionSearch();
 const selectedKey = computed(() => route.name as string);
-const logoPath = '/logo.png';
+const activeProfileName = computed(() => profilesStore.activeProfile?.name || '')
+const isEmployeeWorkbenchProfile = computed(() => activeProfileName.value.startsWith('yoolee-employee-'))
+
+const yooleeNavGroups: Array<Array<{ key: string; label: string; icon: string; suffix?: string }>> = [
+  [
+    { key: 'hermes.chat', label: '对话', icon: 'chat' },
+    { key: 'hermes.groupChat', label: '群聊', icon: 'group', suffix: 'beta' },
+    { key: 'hermes.jobs', label: '任务', icon: 'task', suffix: 'beta' },
+  ],
+  [
+    { key: 'yoolee.employees', label: '员工', icon: 'person' },
+    { key: 'yoolee.customers', label: '模拟客户', icon: 'group' },
+  ],
+  [
+    { key: 'yoolee.evaluations', label: '测评', icon: 'spark' },
+    { key: 'yoolee.learning', label: '学习', icon: 'memory' },
+  ],
+]
+
+function isNavActive(key: string) {
+  if (key === 'yoolee.employees') return selectedKey.value === key || selectedKey.value === 'yoolee.employeeDetail'
+  if (key === 'yoolee.customers') return selectedKey.value === key || selectedKey.value === 'yoolee.customerDetail'
+  if (key === 'yoolee.evaluations') return selectedKey.value === key || selectedKey.value === 'yoolee.evaluationDetail'
+  if (key === 'yoolee.learning') return selectedKey.value === key
+  return selectedKey.value === key
+}
 
 const collapsedGroups = reactive<Record<string, boolean>>({});
 
@@ -32,6 +58,10 @@ function isGroupCollapsed(key: string) {
 
 function handleNav(key: string) {
   router.push({ name: key });
+}
+
+function openWorkbenchSettings() {
+  router.push({ name: 'yoolee.settings' });
 }
 
 async function handleUpdate() {
@@ -58,13 +88,46 @@ function openChangelog() {
 
 <template>
   <aside class="sidebar" :class="{ open: appStore.sidebarOpen }">
-    <div class="sidebar-logo" @click="router.push('/hermes/chat')">
-      <img :src="logoPath" alt="Hermes" class="logo-img" />
-      <span class="logo-text">Hermes</span>
+    <div class="sidebar-logo" @click="router.push('/yoolee')">
+      <img class="logo-mark" :src="logoImage" alt="Yoolee" />
       <!-- <video class="logo-dance" :src="isDark ? danceVideoDark : danceVideoLight" autoplay loop muted playsinline /> -->
     </div>
 
     <nav class="sidebar-nav">
+      <div v-for="(group, index) in yooleeNavGroups" :key="index" class="nav-group primary-nav-group">
+        <button
+          v-for="item in group"
+          :key="item.key"
+          class="nav-item"
+          :class="{ active: isNavActive(item.key) }"
+          @click="handleNav(item.key)"
+        >
+          <span class="nav-icon" :class="`icon-${item.icon}`"></span>
+          <span>{{ item.label }}<span v-if="item.suffix" class="beta-tag">({{ item.suffix }})</span></span>
+        </button>
+      </div>
+
+      <div v-if="false">
+      <div class="nav-group">
+        <div class="nav-group-label" @click="toggleGroup('yoolee')">
+          <span>Yoolee 平台</span>
+          <svg class="nav-group-arrow" :class="{ collapsed: isGroupCollapsed('yoolee') }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </div>
+        <div v-show="!isGroupCollapsed('yoolee')">
+          <button class="nav-item" :class="{ active: selectedKey === 'yoolee.dashboard' }" @click="handleNav('yoolee.dashboard')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="7" height="7" />
+              <rect x="14" y="3" width="7" height="7" />
+              <rect x="14" y="14" width="7" height="7" />
+              <rect x="3" y="14" width="7" height="7" />
+            </svg>
+            <span>配置&测试平台</span>
+          </button>
+        </div>
+      </div>
+
       <!-- Conversation -->
       <div class="nav-group">
         <div class="nav-group-label" @click="toggleGroup('conversation')">
@@ -245,10 +308,18 @@ function openChangelog() {
           </button>
         </div>
       </div>
+      </div>
     </nav>
 
-    <ProfileSelector />
-    <ModelSelector />
+    <div class="workbench-config">
+      <button class="nav-item config-entry" :class="{ active: selectedKey === 'yoolee.settings' }" @click="openWorkbenchSettings">
+        <span class="nav-icon icon-settings"></span>
+        <span>工作台配置</span>
+      </button>
+      <div v-if="isEmployeeWorkbenchProfile" class="profile-warning">
+        当前正在使用员工 Profile，可能影响人工对话和调试上下文
+      </div>
+    </div>
 
     <div class="sidebar-footer">
       <button class="nav-item logout-item" @click="handleLogout">
@@ -277,10 +348,10 @@ function openChangelog() {
         <LanguageSwitch />
       </div>
       <div class="version-info">
-        <a class="github-link" href="https://github.com/EKKOLearnAI/hermes-web-ui" target="_blank" rel="noopener noreferrer" title="GitHub">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-        </a>
-        <span class="version-text" @click="openChangelog">Hermes Web UI v{{ appStore.serverVersion || "0.1.0" }}</span>
+        <div class="version-text" @click="openChangelog">
+          <span>Yoolee 开发版 v0.5</span>
+          <span>Hermes 底座 v{{ appStore.serverVersion || "0.1.0" }}</span>
+        </div>
         <ThemeSwitch />
       </div>
       <NButton v-if="appStore.updateAvailable" type="primary" size="tiny" block class="update-btn" :loading="appStore.updating" @click="handleUpdate">
@@ -320,17 +391,9 @@ function openChangelog() {
   transition: width $transition-normal;
 }
 
-.logo-img {
-  width: 28px;
-  height: 28px;
-  border-radius: 0;
-  flex-shrink: 0;
-}
-
 .sidebar-logo {
   display: flex;
   align-items: center;
-  gap: 10px;
   padding: 20px 12px;
   margin: 0 -12px;
   color: $text-primary;
@@ -344,10 +407,15 @@ function openChangelog() {
   position: relative;
   overflow: hidden;
 
-  .logo-text {
-    font-size: 18px;
-    font-weight: 600;
-    letter-spacing: 0.5px;
+  .logo-mark {
+    display: block;
+    width: 128px;
+    height: auto;
+    object-fit: contain;
+
+    .dark & {
+      filter: invert(1);
+    }
   }
 
   .logo-dance {
@@ -383,6 +451,12 @@ function openChangelog() {
   display: flex;
   flex-direction: column;
   gap: 2px;
+
+  &.primary-nav-group + &.primary-nav-group {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid $border-color;
+  }
 
   &.nav-group-bottom {
     margin-top: auto;
@@ -456,6 +530,146 @@ function openChangelog() {
   }
 }
 
+.nav-icon {
+  width: 16px;
+  height: 16px;
+  display: inline-block;
+  position: relative;
+  flex: 0 0 16px;
+
+  &::before,
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 3px;
+    border: 1.5px solid currentColor;
+    border-radius: 3px;
+  }
+
+  &.icon-chat::before {
+    border-radius: 4px;
+  }
+
+  &.icon-chat::after {
+    inset: auto 3px 1px auto;
+    width: 5px;
+    height: 5px;
+    border-width: 0 1.5px 1.5px 0;
+    transform: rotate(45deg);
+  }
+
+  &.icon-group::before {
+    inset: 3px 7px 7px 2px;
+    border-radius: 50%;
+  }
+
+  &.icon-group::after {
+    inset: 7px 2px 3px 7px;
+    border-radius: 50%;
+  }
+
+  &.icon-person::before {
+    inset: 2px 5px 8px;
+    border-radius: 50%;
+  }
+
+  &.icon-person::after {
+    inset: 9px 3px 2px;
+    border-radius: 8px 8px 2px 2px;
+  }
+
+  &.icon-spark::before {
+    inset: 2px 7px;
+    border-width: 0 1.5px;
+    border-radius: 0;
+    transform: rotate(45deg);
+  }
+
+  &.icon-spark::after {
+    inset: 7px 2px;
+    border-width: 1.5px 0;
+    border-radius: 0;
+    transform: rotate(45deg);
+  }
+
+  &.icon-memory::before {
+    inset: 2px 5px 7px;
+    border-radius: 8px 8px 2px 2px;
+  }
+
+  &.icon-memory::after {
+    inset: auto 6px 2px;
+    height: 4px;
+    border-width: 1.5px 0 0;
+    border-radius: 0;
+  }
+
+  &.icon-task::before {
+    inset: 2px 3px 2px 3px;
+    border-radius: 3px;
+  }
+
+  &.icon-task::after {
+    inset: 5px 6px auto 6px;
+    height: 6px;
+    border-width: 0 0 1.5px 0;
+    border-radius: 0;
+    box-shadow: 0 5px 0 currentColor;
+  }
+
+  &.icon-chart::before {
+    inset: 3px 10px 2px 2px;
+  }
+
+  &.icon-chart::after {
+    inset: 7px 2px 2px 8px;
+  }
+
+  &.icon-search::before {
+    inset: 2px 5px 5px 2px;
+    border-radius: 50%;
+  }
+
+  &.icon-search::after {
+    inset: auto 2px 2px auto;
+    width: 6px;
+    height: 1.5px;
+    border: none;
+    border-radius: 0;
+    background: currentColor;
+    transform: rotate(45deg);
+  }
+}
+
+.workbench-config {
+  padding-top: 8px;
+  border-top: 1px solid $border-color;
+
+  .config-entry {
+    margin: 0 -12px;
+    padding: 10px 12px;
+  }
+}
+
+.workbench-title {
+  padding: 0 12px 8px;
+  color: $text-muted;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.profile-warning {
+  margin: 0 12px 8px;
+  padding: 8px;
+  border: 1px solid rgba(var(--warning-rgb), 0.32);
+  border-radius: $radius-sm;
+  background: rgba(var(--warning-rgb), 0.08);
+  color: $warning;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .sidebar-footer {
   padding-top: 8px;
   border-top: 1px solid $border-color;
@@ -519,17 +733,6 @@ function openChangelog() {
   gap: 8px;
 }
 
-.github-link {
-  color: $text-muted;
-  display: flex;
-  align-items: center;
-  transition: color 0.2s;
-
-  &:hover {
-    color: $text-primary;
-  }
-}
-
 .update-btn {
   margin: 4px 0 0;
   border-radius: 4px;
@@ -538,6 +741,10 @@ function openChangelog() {
 .version-text {
   cursor: pointer;
   transition: color 0.2s;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.35;
 
   &:hover {
     color: $accent-primary;

@@ -21,6 +21,10 @@ const themeOverrides = computed(() => getThemeOverrides(isDark.value))
 const naiveTheme = computed(() => isDark.value ? darkTheme : null)
 
 const isLoginPage = computed(() => route.name === 'login')
+const showYooleeSettingsReturn = computed(() =>
+  String(route.name || '').startsWith('hermes.')
+  && route.query.from === 'yoolee-settings',
+)
 
 const nodeVersionLow = computed(() => {
   const v = appStore.nodeVersion
@@ -62,11 +66,18 @@ useKeyboard()
           </div>
           <div v-if="ready" class="app-layout" :class="{ 'no-sidebar': isLoginPage }">
             <button v-if="!isLoginPage" class="hamburger-btn" @click="appStore.toggleSidebar">
-              <img src="/logo.png" alt="Menu" style="width: 24px; height: 24px;" />
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                <path d="M4 7h16" />
+                <path d="M4 12h16" />
+                <path d="M4 17h16" />
+              </svg>
             </button>
             <div v-if="!isLoginPage && appStore.sidebarOpen" class="mobile-backdrop" @click="appStore.closeSidebar" />
             <AppSidebar v-if="!isLoginPage" />
             <main class="app-main">
+              <div v-if="showYooleeSettingsReturn" class="advanced-return-bar">
+                <button @click="router.push({ name: 'yoolee.settings' })">返回工作台配置</button>
+              </div>
               <router-view />
             </main>
           </div>
@@ -98,6 +109,32 @@ useKeyboard()
 
   .no-sidebar & {
     height: calc(100 * var(--vh));
+  }
+}
+
+.advanced-return-bar {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  display: flex;
+  justify-content: flex-start;
+  padding: 10px 20px;
+  border-bottom: 1px solid $border-color;
+  background: $bg-primary;
+
+  button {
+    border: 1px solid $border-color;
+    border-radius: $radius-sm;
+    background: $bg-card;
+    color: $text-secondary;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 13px;
+
+    &:hover {
+      color: $text-primary;
+      border-color: $accent-primary;
+    }
   }
 }
 

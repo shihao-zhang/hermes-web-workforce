@@ -338,12 +338,6 @@ const renderedToolResult = computed(() => {
     </template>
     <template v-else>
       <div class="msg-body">
-        <img
-          v-if="message.role === 'assistant'"
-          src="/logo.png"
-          alt="Hermes"
-          class="msg-avatar"
-        />
         <div class="msg-content" :class="message.role">
           <div class="message-bubble" :class="{ system: isSystem }">
             <div v-if="hasAttachments" class="msg-attachments">
@@ -489,13 +483,6 @@ const renderedToolResult = computed(() => {
 
     .msg-body {
       max-width: 80%;
-    }
-
-    .msg-avatar {
-      width: 40px;
-      height: 40px;
-      flex-shrink: 0;
-      margin-top: 2px;
     }
 
     .message-bubble {

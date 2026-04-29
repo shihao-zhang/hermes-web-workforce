@@ -6,6 +6,7 @@ import { webhookRoutes } from './webhook'
 import { uploadRoutes } from './upload'
 import { updateRoutes } from './update'
 import { authPublicRoutes, authProtectedRoutes } from './auth'
+import { yooleeRoutes } from './yoolee'
 
 // Hermes route modules
 import { sessionRoutes } from './hermes/sessions'
@@ -45,6 +46,7 @@ export function registerRoutes(app: any, requireAuth: (ctx: Context, next: Next)
   app.use(authProtectedRoutes.routes())
   app.use(uploadRoutes.routes())
   app.use(updateRoutes.routes())           // Must be before proxy (proxy catch-all matches everything)
+  app.use(yooleeRoutes.routes())
   app.use(sessionRoutes.routes())
   app.use(profileRoutes.routes())
   app.use(skillRoutes.routes())

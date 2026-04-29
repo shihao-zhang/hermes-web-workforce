@@ -1,20 +1,18 @@
 import { execFile, spawn } from 'child_process'
-import { existsSync } from 'fs'
+import { existsSync, readFileSync, readdirSync } from 'fs'
+import { homedir } from 'os'
+import { join, resolve } from 'path'
 import { promisify } from 'util'
 import { logger } from '../logger'
+import { hermesExecutionEnv, resolveHermesBin } from './hermes-bin'
 
 const execFileAsync = promisify(execFile)
 
-const execOpts = { windowsHide: true }
+const execOpts = { windowsHide: true, env: hermesExecutionEnv() }
 const isDocker = existsSync('/.dockerenv')
 
-function resolveHermesBin(): string {
-  const envBin = process.env.HERMES_BIN?.trim()
-  if (envBin) return envBin
-  return 'hermes'
-}
-
 const HERMES_BIN = resolveHermesBin()
+const HERMES_BASE = resolve(homedir(), '.hermes')
 
 export interface HermesSession {
   id: string
@@ -377,6 +375,77 @@ export interface HermesProfileDetail {
   hasSoulMd: boolean
 }
 
+function parseProfileListLine(line: string): HermesProfile | null {
+  const trimmed = line.trim()
+  if (!trimmed) return null
+  if (trimmed.startsWith('Profile') || trimmed.startsWith('─')) return null
+  const active = trimmed.startsWith('◆')
+  const normalized = active ? trimmed.slice(1).trim() : trimmed
+  const parts = normalized.split(/\s+/)
+  if (parts.length < 3) return null
+  const [name, model, gateway, ...aliasParts] = parts
+  return {
+    name,
+    active,
+    model,
+    gateway,
+    alias: aliasParts.join(' ') === '—' ? '' : aliasParts.join(' '),
+  }
+}
+
+function readActiveProfileName(): string {
+  try {
+    return readFileSync(join(HERMES_BASE, 'active_profile'), 'utf-8').trim() || 'default'
+  } catch {
+    return 'default'
+  }
+}
+
+function readProfileModel(name: string): string {
+  const dir = name === 'default' ? HERMES_BASE : join(HERMES_BASE, 'profiles', name)
+  try {
+    const content = readFileSync(join(dir, 'config.yaml'), 'utf-8')
+    const match = content.match(/^\s*default:\s*(.+)$/m)
+    return match?.[1]?.trim() || 'profile 默认'
+  } catch {
+    return 'profile 默认'
+  }
+}
+
+function mergeFilesystemProfiles(profiles: HermesProfile[]): HermesProfile[] {
+  const byName = new Map(profiles.map(profile => [profile.name, profile]))
+  const active = readActiveProfileName()
+  if (!byName.has('default')) {
+    byName.set('default', {
+      name: 'default',
+      active: active === 'default',
+      model: readProfileModel('default'),
+      gateway: 'unknown',
+      alias: '',
+    })
+  }
+  const profilesDir = join(HERMES_BASE, 'profiles')
+  if (existsSync(profilesDir)) {
+    for (const entry of readdirSync(profilesDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      if (!existsSync(join(profilesDir, entry.name, 'config.yaml'))) continue
+      if (byName.has(entry.name)) continue
+      byName.set(entry.name, {
+        name: entry.name,
+        active: active === entry.name,
+        model: readProfileModel(entry.name),
+        gateway: 'unknown',
+        alias: '',
+      })
+    }
+  }
+  return Array.from(byName.values()).sort((a, b) => {
+    if (a.name === 'default') return -1
+    if (b.name === 'default') return 1
+    return a.name.localeCompare(b.name)
+  })
+}
+
 /**
  * List all profiles
  */
@@ -390,26 +459,15 @@ export async function listProfiles(): Promise<HermesProfile[]> {
     const lines = stdout.trim().split('\n').filter(Boolean)
     const profiles: HermesProfile[] = []
 
-    // Skip header lines (starts with " Profile" or " ─")
     for (const line of lines) {
-      if (line.startsWith(' Profile') || line.match(/^ ─/)) continue
-
-      const match = line.match(/^\s+(◆)?(\S+)\s{2,}(\S+)\s{2,}(\S+)\s{2,}(.*)$/)
-      if (match) {
-        profiles.push({
-          name: match[2],
-          active: !!match[1],
-          model: match[3],
-          gateway: match[4],
-          alias: match[5].trim() === '—' ? '' : match[5].trim(),
-        })
-      }
+      const profile = parseProfileListLine(line)
+      if (profile) profiles.push(profile)
     }
 
-    return profiles
+    return mergeFilesystemProfiles(profiles)
   } catch (err: any) {
     logger.error(err, 'Hermes CLI: profile list failed')
-    throw new Error(`Failed to list profiles: ${err.message}`)
+    return mergeFilesystemProfiles([])
   }
 }
 

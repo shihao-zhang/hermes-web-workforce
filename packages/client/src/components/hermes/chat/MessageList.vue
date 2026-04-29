@@ -3,13 +3,9 @@ import { ref, computed, watch, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
 import MessageItem from "./MessageItem.vue";
 import { useChatStore } from "@/stores/hermes/chat";
-import thinkingVideoLight from "@/assets/thinking-light.mp4";
-import thinkingVideoDark from "@/assets/thinking-dark.mp4";
-import { useTheme } from "@/composables/useTheme";
 
 const chatStore = useChatStore();
 const { t } = useI18n();
-const { isDark } = useTheme();
 const listRef = ref<HTMLElement>();
 
 function formatTokens(n: number): string {
@@ -115,7 +111,6 @@ watch(currentToolCalls, () => {
 <template>
   <div ref="listRef" class="message-list">
     <div v-if="chatStore.messages.length === 0" class="empty-state">
-      <img src="/logo.png" alt="Hermes" class="empty-logo" />
       <p>{{ t("chat.emptyState") }}</p>
     </div>
     <MessageItem
@@ -125,15 +120,7 @@ watch(currentToolCalls, () => {
       :highlight="chatStore.focusMessageId === msg.id"
     />
     <Transition name="fade">
-      <div v-if="chatStore.isRunActive" class="streaming-indicator">
-        <video
-          :src="isDark ? thinkingVideoDark : thinkingVideoLight"
-          autoplay
-          loop
-          muted
-          playsinline
-          class="thinking-video"
-        />
+      <div v-if="chatStore.isRunActive && (currentToolCalls.length > 0 || chatStore.compressionState)" class="streaming-indicator">
         <div v-if="currentToolCalls.length > 0 || chatStore.compressionState" class="tool-calls-panel">
           <!-- Compression indicator -->
           <div v-if="chatStore.compressionState" class="tool-call-item compression-item">
@@ -238,12 +225,6 @@ watch(currentToolCalls, () => {
   color: $text-muted;
   gap: 12px;
 
-  .empty-logo {
-    width: 48px;
-    height: 48px;
-    opacity: 0.25;
-  }
-
   p {
     font-size: 14px;
   }
@@ -263,20 +244,13 @@ watch(currentToolCalls, () => {
   align-items: flex-start;
   gap: 12px;
   padding: 4px;
-  .thinking-video {
-    width: 120px;
-    height: 213px;
-    border-radius: $radius-md;
-    object-fit: contain;
-    flex-shrink: 0;
-  }
 }
 
 .tool-calls-panel {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-height: 213px;
+  max-height: 96px;
   overflow-y: auto;
   padding-top: 4px;
   scrollbar-width: none;

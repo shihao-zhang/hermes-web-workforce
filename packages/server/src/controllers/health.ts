@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'fs'
 import { resolve } from 'path'
 import * as hermesCli from '../services/hermes/hermes-cli'
+import { getHermesBinStatus } from '../services/hermes/hermes-bin'
 import { getGatewayManagerInstance } from '../services/gateway-bootstrap'
 import { config } from '../config'
 
@@ -68,6 +69,7 @@ export function startVersionCheck(): void {
 }
 
 export async function healthCheck(ctx: any) {
+  const hermesBin = getHermesBinStatus()
   const raw = await hermesCli.getVersion()
   const hermesVersion = raw.split('\n')[0].replace('Hermes Agent ', '') || ''
   let gatewayOk = false
@@ -86,5 +88,9 @@ export async function healthCheck(ctx: any) {
     webui_latest: cachedLatestVersion,
     webui_update_available: Boolean(LOCAL_VERSION && cachedLatestVersion && cachedLatestVersion !== LOCAL_VERSION),
     node_version: process.versions.node,
+    hermes_cli_path: hermesBin.hermes_cli_path,
+    hermes_cli_available: hermesBin.hermes_cli_available,
+    resolution_source: hermesBin.resolution_source,
+    error_message: hermesBin.error_message,
   }
 }

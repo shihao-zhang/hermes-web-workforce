@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { renameSession } from '@/api/hermes/sessions'
+import { fetchCustomers, fetchEmployees, type YooleeCustomer, type YooleeEmployee } from '@/api/yoolee'
 import { useChatStore, type Session } from '@/stores/hermes/chat'
 import { useSessionBrowserPrefsStore } from '@/stores/hermes/session-browser-prefs'
-import { NButton, NDropdown, NInput, NModal, NTooltip, useMessage } from 'naive-ui'
+import { NButton, NDropdown, NInput, NModal, NSelect, NTooltip, useMessage } from 'naive-ui'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getSourceLabel } from '@/shared/session-display'
@@ -18,6 +19,8 @@ const message = useMessage()
 const { t } = useI18n()
 
 const currentMode = ref<'chat' | 'live'>('chat')
+const yooleeEmployees = ref<YooleeEmployee[]>([])
+const yooleeCustomers = ref<YooleeCustomer[]>([])
 
 // Initialize synchronously from the media query so first paint is correct.
 // On narrow viewports the session list is an absolute-positioned overlay
@@ -47,6 +50,7 @@ onMounted(() => {
   mobileQuery = window.matchMedia('(max-width: 768px)')
   handleMobileChange(mobileQuery)
   mobileQuery.addEventListener('change', handleMobileChange)
+  loadYooleeRoles()
 })
 
 onUnmounted(() => {
@@ -79,12 +83,22 @@ interface SessionGroup {
 }
 
 const pinnedSessions = computed(() =>
-  sortSessionsWithActiveFirst(chatStore.sessions.filter(session => sessionBrowserPrefsStore.isPinned(session.id))),
+  sortSessionsWithActiveFirst(visibleChatSessions.value.filter(session => sessionBrowserPrefsStore.isPinned(session.id))),
+)
+
+function isYooleeEvaluationSession(session: Session) {
+  const title = session.title || ''
+  return session.id.startsWith('yoolee-eval-')
+    || title.startsWith('运行能力约束')
+}
+
+const visibleChatSessions = computed(() =>
+  chatStore.sessions.filter(session => !isYooleeEvaluationSession(session)),
 )
 
 const groupedSessions = computed<SessionGroup[]>(() => {
   const map = new Map<string, Session[]>()
-  for (const s of chatStore.sessions) {
+  for (const s of visibleChatSessions.value) {
     if (sessionBrowserPrefsStore.isPinned(s.id)) continue
     const key = s.source || ''
     if (!map.has(key)) map.set(key, [])
@@ -144,6 +158,19 @@ watch(
   { immediate: true },
 )
 
+watch(
+  () => [chatStore.sessionsLoaded, chatStore.activeSessionId, visibleChatSessions.value.map(session => session.id).join('|')],
+  () => {
+    if (!chatStore.sessionsLoaded || !chatStore.activeSessionId) return
+    const active = chatStore.sessions.find(session => session.id === chatStore.activeSessionId)
+    if (!active || !isYooleeEvaluationSession(active)) return
+    const nextSession = visibleChatSessions.value[0]
+    if (nextSession) chatStore.switchSession(nextSession.id)
+    else chatStore.newChat()
+  },
+  { immediate: true },
+)
+
 const activeSessionTitle = computed(() =>
   chatStore.activeSession?.title || t('chat.newChat'),
 )
@@ -155,6 +182,46 @@ const headerTitle = computed(() =>
 const activeSessionSource = computed(() =>
   currentMode.value === 'chat' ? (chatStore.activeSession?.source || '') : '',
 )
+
+const roleTypeOptions = [
+  { label: '无角色', value: 'none' },
+  { label: 'AI员工', value: 'employee' },
+  { label: 'AI客户', value: 'customer' },
+]
+
+const roleType = computed({
+  get: () => chatStore.activeRoleSelection?.type || 'none',
+  set: (type: 'none' | 'employee' | 'customer') => {
+    chatStore.setActiveRoleSelection?.({ type, id: '' })
+  },
+})
+
+const roleEntityId = computed({
+  get: () => chatStore.activeRoleSelection?.id || '',
+  set: (id: string) => {
+    chatStore.setActiveRoleSelection?.({ type: roleType.value, id })
+  },
+})
+
+const roleEntityOptions = computed(() => {
+  if (roleType.value === 'employee') {
+    return yooleeEmployees.value.map(item => ({ label: item.name, value: item.id }))
+  }
+  if (roleType.value === 'customer') {
+    return yooleeCustomers.value.map(item => ({ label: item.name, value: item.id }))
+  }
+  return []
+})
+
+async function loadYooleeRoles() {
+  try {
+    const [employees, customers] = await Promise.all([fetchEmployees(), fetchCustomers()])
+    yooleeEmployees.value = employees
+    yooleeCustomers.value = customers
+  } catch {
+    // Yoolee roles are optional on the chat page.
+  }
+}
 
 function handleNewChat() {
   chatStore.newChat()
@@ -256,9 +323,20 @@ async function handleRenameConfirm() {
           </NButton>
         </div>
       </div>
+      <div v-if="showSessions" class="role-picker">
+        <NSelect v-model:value="roleType" size="small" :options="roleTypeOptions" />
+        <NSelect
+          v-if="roleType !== 'none'"
+          v-model:value="roleEntityId"
+          size="small"
+          filterable
+          :options="roleEntityOptions"
+          :placeholder="roleType === 'employee' ? '选择 AI员工' : '选择 AI客户'"
+        />
+      </div>
       <div v-if="showSessions" class="session-items">
-        <div v-if="chatStore.isLoadingSessions && chatStore.sessions.length === 0" class="session-loading">{{ t('common.loading') }}</div>
-        <div v-else-if="chatStore.sessions.length === 0" class="session-empty">{{ t('chat.noSessions') }}</div>
+        <div v-if="chatStore.isLoadingSessions && visibleChatSessions.length === 0" class="session-loading">{{ t('common.loading') }}</div>
+        <div v-else-if="visibleChatSessions.length === 0" class="session-empty">{{ t('chat.noSessions') }}</div>
 
         <template v-if="pinnedSessions.length > 0">
           <div class="session-group-header session-group-header--static">
@@ -448,6 +526,13 @@ async function handleRenameConfirm() {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.role-picker {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 10px;
+  border-bottom: 1px solid $border-light;
 }
 
 .session-close-btn {

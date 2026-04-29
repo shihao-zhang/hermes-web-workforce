@@ -1,19 +1,33 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
-import { NInput } from 'naive-ui'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { NButton, NInput, NModal, NSelect, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import SkillList from '@/components/hermes/skills/SkillList.vue'
 import SkillDetail from '@/components/hermes/skills/SkillDetail.vue'
-import { fetchSkills, type SkillCategory } from '@/api/hermes/skills'
+import { fetchSkills, importSkillArchive, type SkillCategory } from '@/api/hermes/skills'
+import { fetchProfiles, type HermesProfile } from '@/api/hermes/profiles'
 
 const { t } = useI18n()
+const message = useMessage()
 const categories = ref<SkillCategory[]>([])
+const profiles = ref<HermesProfile[]>([])
 const loading = ref(false)
+const importing = ref(false)
+const showImportModal = ref(false)
+const skillArchiveInputRef = ref<HTMLInputElement | null>(null)
+const selectedArchive = ref<File | null>(null)
+const targetProfile = ref('current')
 const selectedCategory = ref('')
 const selectedSkill = ref('')
 const searchQuery = ref('')
 const showSidebar = ref(true)
 let mobileQuery: MediaQueryList | null = null
+
+const targetProfileOptions = computed(() => [
+  { label: '当前 Hermes profile', value: 'current' },
+  ...profiles.value.map(profile => ({ label: `员工/指定 profile：${profile.name}`, value: profile.name })),
+  { label: '全部 profile', value: 'all' },
+])
 
 function handleMobileChange(e: MediaQueryListEvent | MediaQueryList) {
   showSidebar.value = !e.matches
@@ -41,6 +55,14 @@ async function loadSkills() {
   }
 }
 
+async function loadProfiles() {
+  try {
+    profiles.value = await fetchProfiles()
+  } catch {
+    profiles.value = []
+  }
+}
+
 function handleSelect(category: string, skill: string) {
   selectedCategory.value = category
   selectedSkill.value = skill
@@ -48,6 +70,43 @@ function handleSelect(category: string, skill: string) {
     showSidebar.value = false
   }
 }
+
+function handleArchiveChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  selectedArchive.value = input.files?.[0] || null
+}
+
+function closeImportModal() {
+  showImportModal.value = false
+  selectedArchive.value = null
+  targetProfile.value = 'current'
+  if (skillArchiveInputRef.value) skillArchiveInputRef.value.value = ''
+}
+
+async function handleImportSkill() {
+  const file = selectedArchive.value
+  if (!file) {
+    message.warning('请选择 zip 文件')
+    return
+  }
+  if (!file.name.toLowerCase().endsWith('.zip')) {
+    message.warning('仅支持 .zip 技能包')
+    return
+  }
+  importing.value = true
+  try {
+    const result = await importSkillArchive(file, targetProfile.value)
+    message.success(`已安装 ${result.installed.length} 个 skill`)
+    closeImportModal()
+    await loadSkills()
+  } catch (err: any) {
+    message.error(err.message || '技能上传失败')
+  } finally {
+    importing.value = false
+  }
+}
+
+onMounted(loadProfiles)
 </script>
 
 <template>
@@ -59,14 +118,29 @@ function handleSelect(category: string, skill: string) {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
         </button>
       </div>
-      <NInput
-        v-model:value="searchQuery"
-        :placeholder="t('skills.searchPlaceholder')"
-        size="small"
-        clearable
-        style="width: 160px"
-      />
+      <div class="skills-header-actions">
+        <NButton size="small" @click="showImportModal = true">上传技能</NButton>
+        <NInput
+          v-model:value="searchQuery"
+          :placeholder="t('skills.searchPlaceholder')"
+          size="small"
+          clearable
+          style="width: 160px"
+        />
+      </div>
     </header>
+
+    <NModal v-model:show="showImportModal" preset="dialog" title="上传技能 zip" style="width: 460px;">
+      <div class="skill-import">
+        <p>支持根目录含 SKILL.md、skill/SKILL.md 或 category/skill/SKILL.md；安装时会使用 SKILL.md 中的 canonical name。</p>
+        <NSelect v-model:value="targetProfile" :options="targetProfileOptions" />
+        <input ref="skillArchiveInputRef" type="file" accept=".zip" @change="handleArchiveChange" />
+      </div>
+      <template #action>
+        <NButton @click="closeImportModal">取消</NButton>
+        <NButton type="primary" :loading="importing" :disabled="!selectedArchive" @click="handleImportSkill">上传</NButton>
+      </template>
+    </NModal>
 
     <div class="skills-content">
       <div v-if="loading && categories.length === 0" class="skills-loading">{{ t('common.loading') }}</div>
@@ -120,6 +194,24 @@ function handleSelect(category: string, skill: string) {
 .skills-content {
   flex: 1;
   overflow: hidden;
+}
+
+.skills-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.skill-import {
+  display: grid;
+  gap: 12px;
+
+  p {
+    margin: 0;
+    color: $text-secondary;
+    font-size: 13px;
+    line-height: 1.6;
+  }
 }
 
 .skills-loading {

@@ -2,7 +2,7 @@ import { WebSocketServer } from 'ws'
 import type { Server as HttpServer } from 'http'
 import { accessSync, chmodSync, constants as fsConstants, existsSync } from 'fs'
 import { dirname, join } from 'path'
-import { getToken } from '../../services/auth'
+import { getToken, isValidAuthToken } from '../../services/auth'
 import { logger } from '../../services/logger'
 
 let pty: any = null
@@ -129,7 +129,7 @@ export function setupTerminalWebSocket(httpServer: HttpServer) {
     const authToken = await getToken()
     if (authToken) {
       const token = url.searchParams.get('token') || ''
-      if (token !== authToken) {
+      if (!isValidAuthToken(token, authToken)) {
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
         socket.destroy()
         return

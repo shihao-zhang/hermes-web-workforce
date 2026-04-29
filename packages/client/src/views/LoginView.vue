@@ -4,6 +4,7 @@ import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { setApiKey, hasApiKey } from "@/api/client";
 import { fetchAuthStatus, loginWithPassword } from "@/api/auth";
+import logoImage from "@/assets/logo.png";
 
 const { t } = useI18n();
 const router = useRouter();
@@ -20,10 +21,11 @@ const errorMsg = ref("");
 // Login method: 'token' or 'password'
 const loginMethod = ref<"token" | "password">("token");
 const hasPasswordLogin = ref(false);
+const defaultEntry = "/yoolee";
 
 // If already has a key, try to go to main page
 if (hasApiKey()) {
-  router.replace("/hermes/chat");
+  router.replace(defaultEntry);
 }
 
 onMounted(async () => {
@@ -68,7 +70,7 @@ async function handleTokenLogin() {
     }
 
     setApiKey(key);
-    router.replace("/hermes/chat");
+    router.replace(defaultEntry);
   } catch {
     errorMsg.value = t("login.connectionFailed");
   } finally {
@@ -88,7 +90,7 @@ async function handlePasswordLogin() {
   try {
     const sessionToken = await loginWithPassword(username.value.trim(), password.value);
     setApiKey(sessionToken);
-    router.replace("/hermes/chat");
+    router.replace(defaultEntry);
   } catch (err: any) {
     errorMsg.value = err.message || t("login.invalidCredentials");
   } finally {
@@ -100,9 +102,7 @@ async function handlePasswordLogin() {
 <template>
   <div class="login-view">
     <div class="login-card">
-      <div class="login-logo">
-        <img src="/logo.png" alt="Hermes" width="80" height="80" />
-      </div>
+      <img class="login-logo" :src="logoImage" alt="Yoolee" />
       <h1 class="login-title">{{ t("login.title") }}</h1>
       <p class="login-desc">{{ t("login.description") }}</p>
 
@@ -185,7 +185,16 @@ async function handlePasswordLogin() {
 }
 
 .login-logo {
+  display: block;
+  width: 180px;
+  height: auto;
   margin-bottom: 24px;
+  margin-left: auto;
+  margin-right: auto;
+
+  .dark & {
+    filter: invert(1);
+  }
 }
 
 .login-title {

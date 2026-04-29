@@ -33,6 +33,9 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
     'Content-Type': 'application/json',
     ...options.headers as Record<string, string>,
   }
+  if (options.body instanceof FormData) {
+    delete headers['Content-Type']
+  }
 
   const apiKey = getApiKey()
   if (apiKey) {

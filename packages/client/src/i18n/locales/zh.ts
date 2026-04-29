@@ -1,8 +1,8 @@
 export default {
   // 登录
   login: {
-    title: 'Hermes Web UI',
-    description: '输入访问令牌以继续。令牌在服务端启动日志中查看。',
+    title: 'Yoolee 数字员工配置&测试平台',
+    description: '输入办公室试用访问令牌，进入数字员工配置与对话测评。',
     placeholder: '访问令牌',
     submit: '登录',
     tokenRequired: '请输入访问令牌',

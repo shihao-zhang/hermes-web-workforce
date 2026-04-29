@@ -7,6 +7,10 @@ export interface HealthResponse {
   webui_latest?: string
   webui_update_available?: boolean
   node_version?: string
+  hermes_cli_path?: string
+  hermes_cli_available?: boolean
+  resolution_source?: string
+  error_message?: string
 }
 
 // Config-based model types
