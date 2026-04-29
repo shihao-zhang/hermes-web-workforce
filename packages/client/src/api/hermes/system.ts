@@ -34,7 +34,9 @@ export interface AvailableModelGroup {
   label: string      // display name (e.g. "zai", "subrouter.ai")
   base_url: string
   models: string[]
-  api_key: string
+  /** Deprecated: kept for backwards compatibility; server no longer returns secret values. */
+  api_key?: string
+  has_api_key?: boolean
   /** 可选：模型 ID -> 元数据（preview/disabled）。目前仅 Copilot 提供。 */
   model_meta?: Record<string, { preview?: boolean; disabled?: boolean }>
 }

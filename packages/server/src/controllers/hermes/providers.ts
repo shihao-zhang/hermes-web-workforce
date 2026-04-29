@@ -17,7 +17,6 @@ export async function create(ctx: any) {
   const { name, base_url, api_key, model, context_length, providerKey } = ctx.request.body as {
     name: string; base_url: string; api_key: string; model: string; context_length?: number; providerKey?: string | null
   }
-  console.log(name, base_url, api_key, model, providerKey)
   if (!name || !base_url || !model) {
     ctx.status = 400; ctx.body = { error: 'Missing name, base_url, or model' }; return
   }
@@ -49,7 +48,6 @@ export async function create(ctx: any) {
       config.model.default = model
       config.model.provider = poolKey
     } else {
-      console.log(PROVIDER_ENV_MAP[poolKey])
       if (PROVIDER_ENV_MAP[poolKey].api_key_env) {
         await saveEnvValue(PROVIDER_ENV_MAP[poolKey].api_key_env, api_key)
         if (PROVIDER_ENV_MAP[poolKey].base_url_env) { await saveEnvValue(PROVIDER_ENV_MAP[poolKey].base_url_env, base_url) }

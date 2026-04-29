@@ -22,16 +22,20 @@ const isCustom = (provider: string) => provider.startsWith('custom:')
 
 function getEditKey(provider: string): string {
   if (!(provider in editKeys.value)) {
-    const g = modelsStore.providers.find(p => p.provider === provider)
-    editKeys.value[provider] = g?.api_key || ''
+    editKeys.value[provider] = ''
   }
   return editKeys.value[provider]
+}
+
+function apiKeyPlaceholder(provider: string): string {
+  const g = modelsStore.providers.find(p => p.provider === provider)
+  return g?.has_api_key ? '已配置，输入新 API Key 可替换' : t('settings.models.apiKeyPlaceholder')
 }
 
 async function handleSaveApiKey(providerKey: string) {
   const key = getEditKey(providerKey)
   if (!key.trim()) {
-    message.warning(t('settings.models.apiKeyPlaceholder'))
+    message.warning('请输入新的 API Key')
     return
   }
   savingKey.value = providerKey
@@ -48,6 +52,10 @@ async function handleSaveApiKey(providerKey: string) {
 
 async function handleSaveCustom(providerKey: string) {
   const key = getEditKey(providerKey)
+  if (!key.trim()) {
+    message.warning('请输入新的 API Key')
+    return
+  }
   savingKey.value = providerKey
   try {
     await updateProvider(providerKey, { api_key: key.trim() })
@@ -83,7 +91,7 @@ async function handleSaveCustom(providerKey: string) {
               :value="getEditKey(g.provider)"
               type="password"
               show-password-on="click"
-              :placeholder="t('settings.models.apiKeyPlaceholder')"
+              :placeholder="apiKeyPlaceholder(g.provider)"
               autocomplete="off"
               @update:value="v => editKeys[g.provider] = v"
             />
@@ -105,7 +113,7 @@ async function handleSaveCustom(providerKey: string) {
               :value="getEditKey(g.provider)"
               type="password"
               show-password-on="click"
-              :placeholder="t('settings.models.apiKeyPlaceholder')"
+              :placeholder="apiKeyPlaceholder(g.provider)"
               autocomplete="off"
               @update:value="v => editKeys[g.provider] = v"
             />

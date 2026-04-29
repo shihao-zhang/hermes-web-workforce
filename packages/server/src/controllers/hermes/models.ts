@@ -39,7 +39,7 @@ export async function getAvailable(ctx: any) {
       currentDefault = modelSection.trim()
     }
 
-    const groups: Array<{ provider: string; label: string; base_url: string; models: string[]; api_key: string; model_meta?: Record<string, { preview?: boolean; disabled?: boolean }> }> = []
+    const groups: Array<{ provider: string; label: string; base_url: string; models: string[]; api_key: string; has_api_key: boolean; model_meta?: Record<string, { preview?: boolean; disabled?: boolean }> }> = []
     const seenProviders = new Set<string>()
 
     let envContent = ''
@@ -58,7 +58,7 @@ export async function getAvailable(ctx: any) {
     const addGroup = (provider: string, label: string, base_url: string, models: string[], api_key: string, model_meta?: Record<string, { preview?: boolean; disabled?: boolean }>) => {
       if (seenProviders.has(provider)) return
       seenProviders.add(provider)
-      groups.push({ provider, label, base_url, models: [...models], api_key, ...(model_meta ? { model_meta } : {}) })
+      groups.push({ provider, label, base_url, models: [...models], api_key: '', has_api_key: api_key.trim().length > 0, ...(model_meta ? { model_meta } : {}) })
     }
 
     const isOAuthAuthorized = (providerKey: string): boolean => {
@@ -181,6 +181,8 @@ export async function getAvailable(ctx: any) {
       label: p.label,
       base_url: p.base_url,
       models: p.value === 'copilot' && liveCopilotIds.length > 0 ? liveCopilotIds : p.models,
+      api_key: '',
+      has_api_key: false,
     }))
 
     if (groups.length === 0) {
