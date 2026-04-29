@@ -92,6 +92,33 @@ async function readConfig(): Promise<Record<string, any>> {
   return (YAML.load(raw) as Record<string, any>) || {}
 }
 
+const SENSITIVE_RESPONSE_KEYS = new Set([
+  'api_key',
+  'token',
+  'secret',
+  'app_secret',
+  'client_secret',
+  'access_token',
+  'refresh_token',
+  'password',
+])
+
+function sanitizeForResponse(value: any): any {
+  if (Array.isArray(value)) return value.map(item => sanitizeForResponse(item))
+  if (!value || typeof value !== 'object') return value
+
+  const output: Record<string, any> = {}
+  for (const [key, rawValue] of Object.entries(value)) {
+    if (SENSITIVE_RESPONSE_KEYS.has(key)) {
+      output[key] = ''
+      output[`has_${key}`] = Boolean(String(rawValue || '').trim())
+      continue
+    }
+    output[key] = sanitizeForResponse(rawValue)
+  }
+  return output
+}
+
 async function writeConfig(data: Record<string, any>): Promise<void> {
   const cp = configPath()
   await copyFile(cp, cp + '.bak')
@@ -112,14 +139,14 @@ export async function getConfig(ctx: any) {
     }
     const { section, sections } = ctx.query
     if (section) {
-      ctx.body = { [section as string]: config[section as string] || {} }
+      ctx.body = sanitizeForResponse({ [section as string]: config[section as string] || {} })
     } else if (sections) {
       const keys = (sections as string).split(',')
       const result: Record<string, any> = {}
       for (const key of keys) { result[key.trim()] = config[key.trim()] || {} }
-      ctx.body = result
+      ctx.body = sanitizeForResponse(result)
     } else {
-      ctx.body = config
+      ctx.body = sanitizeForResponse(config)
     }
   } catch (err: any) {
     ctx.status = 500; ctx.body = { error: err.message }
