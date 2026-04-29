@@ -90,37 +90,36 @@ export class GatewaySummarizer implements GatewayCaller {
 
             const source = new EventSource(eventsUrl.toString())
 
-            source.onmessage = (event: MessageEvent) => {
+            source.onmessage = async (event: MessageEvent) => {
                 try {
                     const parsed = JSON.parse(event.data)
                     if (parsed.event === 'run.completed') {
                         clearTimeout(timer)
-                        source.close()
 
-                        // Record usage data from Hermes state.db
-                        // Wait a bit for Hermes to write to database, then fetch accurate usage
-                        setTimeout(async () => {
-                            try {
-                                const profile = getActiveProfileName()
-                                const detail = await getSessionDetailFromDb(sessionId)
-                                if (detail) {
-                                    updateUsage(sessionId, {
-                                        inputTokens: detail.input_tokens,
-                                        outputTokens: detail.output_tokens,
-                                        cacheReadTokens: detail.cache_read_tokens,
-                                        cacheWriteTokens: detail.cache_write_tokens,
-                                        reasoningTokens: detail.reasoning_tokens,
-                                        model: detail.model,
-                                        profile,
-                                    })
-                                    logger.debug(`[GatewaySummarizer] Recorded usage for compression session ${sessionId}: input=${detail.input_tokens}, output=${detail.output_tokens}`)
-                                } else {
-                                    logger.warn(`[GatewaySummarizer] Failed to get session detail for ${sessionId}`)
-                                }
-                            } catch (err: any) {
-                                logger.warn(err, '[GatewaySummarizer] Failed to record usage from DB')
+                        // Record usage data from Hermes state.db BEFORE closing source
+                        // This ensures we fetch usage before sessionCleaner can delete it
+                        try {
+                            const profile = getActiveProfileName()
+                            const detail = await getSessionDetailFromDb(sessionId)
+                            if (detail) {
+                                updateUsage(sessionId, {
+                                    inputTokens: detail.input_tokens,
+                                    outputTokens: detail.output_tokens,
+                                    cacheReadTokens: detail.cache_read_tokens,
+                                    cacheWriteTokens: detail.cache_write_tokens,
+                                    reasoningTokens: detail.reasoning_tokens,
+                                    model: detail.model,
+                                    profile,
+                                })
+                                logger.debug(`[GatewaySummarizer] Recorded usage for compression session ${sessionId}: input=${detail.input_tokens}, output=${detail.output_tokens}`)
+                            } else {
+                                logger.warn(`[GatewaySummarizer] Failed to get session detail for ${sessionId}`)
                             }
-                        }, 500)
+                        } catch (err: any) {
+                            logger.warn(err, '[GatewaySummarizer] Failed to record usage from DB')
+                        }
+
+                        source.close()
 
                         const output = parsed.output
                         if (!output || typeof output !== 'string' || output.trim() === '') {
