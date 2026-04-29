@@ -5,6 +5,7 @@ import {
   generateCustomerReply,
   generateEmployeeReplyWithTrace,
   generateLearningReviewPrompt,
+  findMissingSkillsForProfile,
   prepareEvaluationRuntimeProfile,
   shouldStop,
 } from '../services/yoolee/runner'
@@ -36,6 +37,9 @@ function sanitizeEvaluationError(error: unknown): string {
   }
   if (/Gateway health check timed out|timed out|timeout/i.test(message)) {
     return 'Gateway health check timed out.'
+  }
+  if (/绑定 Skill 未安装|绑定 Skill 未在员工 profile 中找到|missing bound skills/i.test(message)) {
+    return message.length > 500 ? `${message.slice(0, 500)}...` : message
   }
   if (/Command failed: hermes -z/i.test(message)) {
     const stderr = message.split('\n').map(line => line.trim()).filter(Boolean).find(line => !line.startsWith('Command failed: hermes -z'))
@@ -191,6 +195,11 @@ export async function listEmployees(ctx: any) {
 export async function createEmployee(ctx: any) {
   const body = ctx.request.body || {}
   if (!String(body.name || '').trim()) return badRequest(ctx, 'Missing employee name')
+  const profile = String(body.profile_name || body.profile || 'default')
+  const missingSkills = await findMissingSkillsForProfile(profile, Array.isArray(body.skills) ? body.skills : [])
+  if (missingSkills.length) {
+    return badRequest(ctx, `绑定 Skill 未安装到员工 Profile「${profile}」：${missingSkills.join(', ')}。请先安装到该 Profile，或切换员工 Profile。`)
+  }
   ctx.body = { employee: store.saveEmployee(body) }
 }
 
@@ -203,6 +212,12 @@ export async function updateEmployee(ctx: any) {
   }
   const body = ctx.request.body || {}
   if (!String(body.name || existing.name).trim()) return badRequest(ctx, 'Missing employee name')
+  const nextProfile = String(body.profile_name || body.profile || existing.profile_name || existing.profile || 'default')
+  const nextSkills = Array.isArray(body.skills) ? body.skills : existing.skills
+  const missingSkills = await findMissingSkillsForProfile(nextProfile, nextSkills)
+  if (missingSkills.length) {
+    return badRequest(ctx, `绑定 Skill 未安装到员工 Profile「${nextProfile}」：${missingSkills.join(', ')}。请先安装到该 Profile，或切换员工 Profile。`)
+  }
   ctx.body = { employee: store.saveEmployee({ ...existing, ...body, id: existing.id, created_at: existing.created_at }) }
 }
 
@@ -428,6 +443,25 @@ export async function runEvaluation(ctx: any) {
       status: 'warning',
       raw_event: { runtime_profile: runtimeProfile.profileName },
     })
+  }
+  const missingSkillWarnings = runtimeProfile.warnings.filter(item => item.startsWith('绑定 Skill 未在员工 profile 中找到'))
+  if (missingSkillWarnings.length) {
+    const errorMessage = `${missingSkillWarnings.join('；')}。请先把这些 skill 安装到员工 Profile「${runtimeProfile.sourceProfile}」，或切换员工绑定 Profile。`
+    messages.push({
+      round: 1,
+      speaker: 'system',
+      content: '测评运行失败，员工能力配置不完整。',
+      error: errorMessage,
+      created_at: Date.now(),
+    })
+    evaluation = store.updateEvaluation(evaluation.id, {
+      status: 'failed',
+      messages,
+      error: errorMessage,
+      duration_ms: Date.now() - started,
+    }) || evaluation
+    ctx.body = { evaluation }
+    return
   }
 
   if (context) {

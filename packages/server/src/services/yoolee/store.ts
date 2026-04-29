@@ -544,6 +544,9 @@ function enrichEvaluationStatus(evaluation: YooleeEvaluation): YooleeEvaluation 
   if (/ENOENT|not found|Hermes CLI was not found|HERMES_BIN/i.test(error)) {
     failureType = 'Hermes CLI 未找到'
     action = '检查 HERMES_BIN 或服务启动 PATH 后重试'
+  } else if (/绑定 Skill 未安装|绑定 Skill 未在员工 profile 中找到/i.test(error)) {
+    failureType = '员工能力配置错误'
+    action = '把绑定 skill 安装到员工 Profile，或切换员工绑定 Profile'
   } else if (/Gateway health check timed out|timeout|timed out/i.test(error)) {
     failureType = 'Gateway 超时'
     action = '检查 Gateway 后重试测评'

@@ -3,6 +3,7 @@ import { existsSync } from 'fs'
 import { copyFile, cp, mkdir, readFile, readdir, rm, writeFile } from 'fs/promises'
 import { basename, dirname, join, relative, resolve } from 'path'
 import { promisify } from 'util'
+import yaml from 'js-yaml'
 import { config } from '../../config'
 import { getGatewayManagerInstance } from '../gateway-bootstrap'
 import { hermesExecutionEnv, resolveHermesBin } from '../hermes/hermes-bin'
@@ -187,6 +188,40 @@ async function findSkillDir(skillsRoot: string, skillName: string): Promise<stri
   return null
 }
 
+async function hardenRuntimeGatewayConfig(profileDir: string): Promise<void> {
+  const configPath = join(profileDir, 'config.yaml')
+  let cfg: any = {}
+  try {
+    cfg = yaml.load(await readFile(configPath, 'utf-8')) || {}
+  } catch {
+    cfg = {}
+  }
+  if (!cfg.platforms) cfg.platforms = {}
+  for (const [name, value] of Object.entries(cfg.platforms)) {
+    if (name !== 'api_server' && value && typeof value === 'object') {
+      ;(value as any).enabled = false
+    }
+  }
+  if (!cfg.platforms.api_server) cfg.platforms.api_server = {}
+  if (!cfg.platforms.api_server.extra) cfg.platforms.api_server.extra = {}
+  cfg.platforms.api_server.enabled = true
+  cfg.platforms.api_server.key = ''
+  cfg.platforms.api_server.cors_origins = '*'
+  cfg.platforms.api_server.extra.host = cfg.platforms.api_server.extra.host || '127.0.0.1'
+  cfg.platforms.api_server.extra.port = cfg.platforms.api_server.extra.port || 8642
+  await writeFile(configPath, yaml.dump(cfg, { lineWidth: -1 }), 'utf-8')
+}
+
+export async function findMissingSkillsForProfile(profile: string, skills: string[]): Promise<string[]> {
+  const profileDir = getProfileDir(profile || 'default')
+  const skillsRoot = join(profileDir, 'skills')
+  const missing: string[] = []
+  for (const skill of skills.map(String).filter(Boolean)) {
+    if (!await findSkillDir(skillsRoot, skill)) missing.push(skill)
+  }
+  return missing
+}
+
 export async function prepareEvaluationRuntimeProfile(employee: YooleeEmployee, evaluationId: string): Promise<EvaluationRuntimeProfile> {
   const profileName = `yoolee-eval-runtime-${evaluationId}-employee`.replace(/[^a-zA-Z0-9_-]/g, '-')
   const profileDir = resolveProfileDir(profileName)
@@ -211,6 +246,7 @@ export async function prepareEvaluationRuntimeProfile(employee: YooleeEmployee, 
   if (!existsSync(join(profileDir, 'config.yaml'))) {
     warnings.push('runtime profile 未找到 config.yaml，Gateway 将使用底座默认配置。')
   }
+  await hardenRuntimeGatewayConfig(profileDir)
 
   await copyIfExists(join(sourceDir, 'memories', 'MEMORY.md'), join(profileDir, 'memories', 'MEMORY.md'))
   if (!existsSync(join(profileDir, 'memories', 'MEMORY.md'))) {

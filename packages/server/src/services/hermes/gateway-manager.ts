@@ -28,6 +28,7 @@
  * 启动模式：
  *   - 正常系统（macOS/Linux）：hermes gateway start/stop（系统服务管理）
  *   - WSL / Docker：hermes gateway run（detached 子进程，手动 kill）
+ *   - Yoolee runtime profile：始终使用 gateway run，避免 macOS 服务回落到全局 profile
  */
 
 import { spawn, type ChildProcess } from 'child_process'
@@ -50,9 +51,14 @@ const execFileAsync = promisify(execFile)
 const HERMES_BASE = resolve(homedir(), '.hermes')
 const HERMES_BIN = resolveHermesBin()
 const TEMP_PROFILE_PREFIXES = ['yoolee-eval-runtime-']
+const YOLOYEE_EMPLOYEE_PROFILE_PREFIX = 'yoolee-employee-'
 
 function isTemporaryProfile(name: string): boolean {
   return TEMP_PROFILE_PREFIXES.some(prefix => name.startsWith(prefix))
+}
+
+function isYooleeEmployeeProfile(name: string): boolean {
+  return name.startsWith(YOLOYEE_EMPLOYEE_PROFILE_PREFIX)
 }
 
 // WSL / Docker 没有 systemd 或 launchd，需要用 "gateway run" 代替 "gateway start"
@@ -419,12 +425,17 @@ export class GatewayManager {
     const { port, host } = await this.resolvePort(name)
     const hermesHome = this.profileDir(name)
     const url = `http://${host}:${port}`
+    const runMode = needsRunMode || isTemporaryProfile(name)
 
-    if (needsRunMode) {
-      // WSL / Docker：无 systemd/launchd，用 "gateway run" 作为 detached 子进程
+    if (runMode) {
+      // 一次性/临时 profile 必须显式使用 --profile + gateway run。
+      // macOS 的 gateway start 走 launchctl，容易启动到全局/default profile。
       return new Promise((resolve, reject) => {
-        const env = hermesExecutionEnv({ HERMES_HOME: hermesHome })
-        const child = spawn(HERMES_BIN, ['gateway', 'run', '--replace'], {
+        const env = hermesExecutionEnv({ HERMES_HOME: HERMES_BASE })
+        const args = name === 'default'
+          ? ['gateway', 'run', '--replace']
+          : ['--profile', name, 'gateway', 'run', '--replace']
+        const child = spawn(HERMES_BIN, args, {
           detached: true,
           stdio: 'ignore',
           windowsHide: true,
@@ -577,6 +588,11 @@ export class GatewayManager {
     // Phase 1: 顺序处理
     const toStart: string[] = []
     for (const name of profiles) {
+      if (isYooleeEmployeeProfile(name) && name !== this.activeProfile) {
+        logger.info('%s: Yoolee employee profile, skipping auto-start until first use', name)
+        continue
+      }
+
       const existing = this.gateways.get(name)
       if (existing && this.isProcessAlive(existing.pid)) {
         logger.info('%s: already running (PID: %d)', name, existing.pid)
